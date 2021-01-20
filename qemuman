@@ -1,0 +1,438 @@
+#!/bin/bash
+
+#
+#  Deal with input that are not integer
+#
+
+help_function () {
+ printf "will help you\n" 
+ exit 0
+}
+
+if [[ "$1" == "-h" ]] || [[ "$1" == "--help" ]];
+then
+  help_function
+  exit 0
+fi
+
+printf "Select an option\n"
+printf "> 1. New VM\n  2. Existing VM\n  3. Write to an Existing VM\n  4. Run a VM\n  5. Running VMs\n  6. Help\n"
+read option
+
+info () {
+
+  printf "Select the format\n"
+  printf "> 1. qcow2\n  2. qed\n  3. qcow\n"
+  read format
+
+  if [[ -z "$format" ]] || [[ "$format" == 1 ]]
+  then
+    f="qcow2"
+
+  elif [ "$format" == 2 ];
+  then
+    f="qed"
+
+  elif [ "$format" == 3 ];
+  then
+    f="qcow"
+  fi
+
+  read -p 'Enter the name of the VM: ' name
+
+  if [ -z "$name" ];
+  then
+    printf "Empty field\n"
+    exit 0
+  fi
+
+  echo
+
+  printf "Directory\n"
+  printf "> Current Directory\n  Enter the path\n"
+  read path
+
+  if [ -z "$path" ];
+  then
+    path=$PWD
+
+  elif [ -d "$path" ];
+  then
+    path=$path
+  
+  else
+    printf "You have lost the path\n"
+    exit 0
+  fi
+
+  pathname="$path/$name"
+  if [ -f "$pathname.$f" ];
+  then
+    printf "File already exists\n"
+    exit 0
+  fi
+
+
+  printf "Select a size format\n"
+  printf "> 1. GB\n  2. MB\n"
+  read type
+
+  if [[ -z "$type" ]] || [[ "$type" == 1 ]];
+  then
+    space="G"
+
+  elif [ "$type" == 2 ];
+  then
+    space="M"
+  fi
+
+  read -p "Disk space: " d
+  if [ -z "$d" ];
+  then
+    printf "Space is required\n"
+    exit 0
+
+  elif ! [[ "$d" =~ ^[0-9]+$ ]]
+  then
+    printf "Integers only\n"
+    exit 0
+  fi
+
+}
+
+create () {
+  printf "Creating a VM\n"
+
+  printf "qemu-img create -f %s %s.%s %s\n" "$f" "$pathname" "$f" "$d$space"
+  
+  qemu-img create -f "$f" "$pathname.$f" "$d$space" > /dev/null
+
+  if [ -f "$pathname.$f" ]
+  then
+    printf "Created an image: %s\n" "$pathname.$f"
+    write_image "$pathname.$f"
+  fi
+}
+
+write_image () {
+  arr="$1"
+  ava_vm=()
+
+  printf "Select an image: \n"
+  let i=1
+
+  for vm in ${arr[@]}; do
+    filesize=$(stat -c%s "$vm")
+    if [ "$filesize" -ge 5242880 ];
+    then
+      let check=1
+      continue
+    else
+      ava_vm+=("$vm")
+    fi
+  done
+
+  for vm in ${ava_vm[@]}; do
+    if [ "$i" == 1 ]
+    then
+      echo -n "> $i. "
+      echo "$vm" |  awk -F "/" '{print $NF}'
+
+    else
+      echo -n "  $i. "
+      echo "$vm" |  awk -F "/" '{print $NF}'
+    fi
+
+    let i++
+  done
+
+  if [[ "$i" == 1 ]] && [[ "$check" == 1 ]];
+  then
+    printf "No writable images found\n"
+    exit 0
+  fi
+
+  read sel_img
+
+  if [[ -z "$sel_img" ]] || [[ "$sel_img" == 1 ]];
+  then
+    sel_img=0
+  else
+    (( sel_img = sel_img - 1 ))
+  fi
+
+  printf "Select iso to use for the VM: \n"
+  isos=( $(find $HOME -iname *.iso 2> /dev/null) )
+  let j=1
+  for iso in ${isos[@]}; do
+    if [ "$j" == 1 ];
+    then
+      echo -n "> $j. "
+      echo "$iso" | awk -F "/" '{print $NF}'
+
+    else
+      echo -n "  $j. "
+      echo "$iso" | awk -F "/" '{print $NF}'
+    fi
+
+    let j++
+  done
+
+  read sel_iso
+
+  if [[ -z "$sel_iso" ]] || [[ "$sel_iso" == 1 ]];
+  then
+    sel_iso=0
+
+  else
+    (( sel_iso = sel_iso - 1 ))
+  fi
+
+  crearr=()
+  crearr+=("${ava_vm[sel_img]}")
+  crearr+=("${isos[sel_iso]}")
+
+  launch "${crearr[0]}" "${crearr[1]}"
+}
+
+exist () {
+  printf "Available VM: \n"
+
+  let i=1
+  arr=()
+
+  # qcow2
+
+  printf "Scanning for qcow2...\n"
+
+  for vm in `find $HOME -name "*.qcow2" 2> /dev/null`; do
+    arr+=("$vm")
+  done
+
+  # qcow
+
+  printf "Scanning for qcow...\n"
+
+  for vm in `find $HOME -name "*.qcow" 2> /dev/null`; do
+    arr+=("$vm")
+  done
+
+  # qed
+
+  printf "Scanning for qed...\n"
+
+  for vm in `find $HOME -name "*.qed" 2> /dev/null`; do
+    arr+=("$vm")
+  done
+
+  echo
+
+  if [ -z "$1" ];
+  then
+    for vm in ${arr[@]}; do
+      echo -n "$i. "
+      echo "$vm" |  awk -F "/" '{print $NF}'
+      let i++
+    done
+
+  else
+    "$1" "${arr[@]}"
+  fi
+}
+
+run () {
+  arr="$1"
+  for vm in ${arr[@]}; do
+    if [ "$i" == 1 ]
+    then
+      echo -n "> $i. "
+      echo "$vm" |  awk -F "/" '{print $NF}'
+
+    else
+      echo -n "  $i. "
+      echo "$vm" |  awk -F "/" '{print $NF}'
+    fi
+
+    let i++
+  done
+  
+  if [ "${#arr[@]}" == 0 ]
+  then
+    printf "No VMs\n"
+    exit 0
+  fi
+
+  printf "Select a VM: "
+  read vm_sel
+
+  if [ -z "$vm_sel" ];
+  then
+    vm_sel=0
+  
+  else
+    (( vm_sel = vm_sel - 1 ))
+  fi
+
+  while ! [[ "$vm_sel" =~ ^[0-9]+$ ]]; do
+    printf "Select a VM: "
+    read vm_sel
+  done
+
+  launch "${arr["$vm_sel"]}"
+}
+
+launch () {
+  vm=()
+  vm+=("$1")
+
+  if ! [ -z "$2" ];
+  then
+    vm+=("$2")
+  fi
+
+  format=$(echo "${vm[0]}" | awk -F "." '{print $NF}')
+
+  # for cpu model
+
+  printf "cpu [default = host]: "
+  read cpu_model
+
+  if [ -z "$cpu_model" ]
+  then
+    cpu_model=host
+  fi
+
+  # for memory
+
+  printf "memory: "
+  read mem
+
+  while [ -z "$mem" ]; do
+    printf "memory: "
+    read mem
+  done
+
+  while ! [[ "$mem" =~ ^[0-9]+$ ]]; do
+    printf "memory: "
+    read mem
+  done
+
+  printf "> 1. GB\n  2. MB\n"
+  read mem_alloc
+
+  if [[ -z "$mem_alloc" ]] || [[ "$mem_alloc" == 1 ]];
+  then
+    mem_alloc=G
+
+  elif [ $mem_alloc == 2 ];
+  then
+    mem_alloc=M
+  else
+    exit 0
+  fi
+
+  # for cpus
+
+  printf "number of cpus: "
+  read num_cpu
+
+  while [ -z "$num_cpu" ];
+  do
+    printf "number of cpus: "
+    read num_cpu
+  done
+
+  # for sandbox
+
+  printf "sandbox [default = off]: "
+  read sandx
+
+  if [ -z "$sandx" ];
+  then
+    sandx=off
+  fi
+
+  if [ "${#vm[@]}" == 1 ];
+  then
+    image="${vm[0]}"
+    echo "qemu-system-x86_64 -cpu "$cpu_model" -enable-kvm -m "$mem$mem_alloc" -smp "$num_cpu" -vga virtio -display sdl -drive file="$image",format=$format -soundhw all --sandbox "$sandx""
+    qemu-system-x86_64 -cpu "$cpu_model" -enable-kvm -m "$mem$mem_alloc" -smp "$num_cpu" -vga virtio -display sdl -drive file="$image",format=$format -soundhw all --sandbox "$sandx" -daemonize > /dev/null
+
+  else
+    rom="${vm[1]}"
+    image="${vm[0]}"
+    echo "qemu-system-x86_64 -cdrom "$rom" -cpu "$cpu_model" -enable-kvm -m "$mem$mem_alloc" -smp "$num_cpu" -vga virtio -display sdl -drive file="$image",format=$format -soundhw all --sandbox "$sandx""
+    qemu-system-x86_64 -cdrom "$rom" -cpu "$cpu_model" -enable-kvm -m "$mem$mem_alloc" -smp "$num_cpu" -vga virtio -display sdl -drive file="$image",format=$format -soundhw all --sandbox "$sandx" > /dev/null
+  fi
+}
+
+running () {
+  printf "Running VMs: \n"
+
+  rvms=( $(ps -eo cmd | awk '{for (I=1;I<=NF;I++) if ($I == "qemu-system-x86_64") {for (J=1;J<=NF;J++) {print $(J)};};}') )
+  qemvm="${rvms[@]}"
+
+  for opt in ${rvms[@]}; do
+    if [ "$prev" == "-drive" ];
+    then
+      runvm=$(echo "$opt" | awk -F "=" '{print $2}' | awk -F "/" '{print $NF}' | awk -F "," '{print $1}' | awk -F "." '{print $1}')          # bad writing - cant do anything, meh
+
+      echo "$runvm"
+      echo
+
+      echo -n "Do you wanna kill "$runvm" [default = no]: "
+      read kill_opt
+      
+      if [ "$kill_opt" == "yes" ];
+      then
+        pid=$(ps -aef | grep -v grep | grep "$qemvm" | awk '{print $2}')
+        kill "$pid"
+        
+        printf "Killed the VM process %s\n", "$runvm"
+      fi
+
+    fi
+    prev="$opt"
+  done
+
+  if [ -z "$runvm" ];
+  then
+    printf "No VMs are running\n"
+  fi
+}
+
+# default = create a new vm
+if [[ -z "$option" ]] || [[ "$option" == 1 ]];
+then
+  info
+  create
+
+# display existing vms
+elif [ "$option" == 2 ];
+then
+  exist
+
+# writing to an existing img
+elif [ "$option" == 3 ];
+then
+  exist "write_image"
+
+# run an existing vm
+elif [ "$option" == 4 ];
+then
+  exist "run"
+
+# display the running vms
+elif [ "$option" == 5 ];
+then
+  running
+
+# display help
+elif [ "$option" == 6 ];
+then
+  help_function
+  exit 0
+
+else
+  printf "Select between 1-6\n"
+fi
